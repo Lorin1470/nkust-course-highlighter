@@ -42,15 +42,83 @@ class NkustApiService {
   }
 
   /**
-   * 取得當前學年與學期
+   * 取得當前學年與學期（嘗試多種選擇器以增加容錯性）
    */
   getAcademicYearAndSemester() {
-    const yearElem = document.querySelector(this.config.SELECTORS.schoolYearInput);
-    const semElem = document.querySelector(this.config.SELECTORS.semesterInput);
-    
-    const year = yearElem ? yearElem.value : '115';
-    const semester = semElem ? semElem.value : '1';
+    const yearSel = [
+      '#SchoolYear',
+      '[name="SchoolYear"]',
+      'input#SchoolYear',
+      'input[name="SchoolYear"]'
+    ].find(sel => {
+      const el = document.querySelector(sel);
+      return el && el.value !== '';
+    });
+    const semSel = [
+      '#Semester',
+      '[name="Semester"]',
+      'input#Semester',
+      'input[name="Semester"]'
+    ].find(sel => {
+      const el = document.querySelector(sel);
+      return el && el.value !== '';
+    });
+
+    const yearEl = yearSel ? document.querySelector(yearSel) : null;
+    const semEl = semSel ? document.querySelector(semSel) : null;
+
+    const year = yearEl ? yearEl.value : '115';
+    const semester = semEl ? semEl.value : '1';
+    console.log('[NKUST Highlighter] Academic year:', year, 'semester:', semester);
     return { year, semester };
+  }
+
+  /**
+   * 產生查詢參數（POST body 或 URL query string）
+   */
+  buildParams(courseData, { year, semester }) {
+    const params = new URLSearchParams();
+    params.append('selCrsno', courseData.encodeCrsno);
+    params.append('selSchoolYear', year);
+    params.append('selSemester', semester);
+    return params;
+  }
+
+  /**
+   * 透過 POST 發送請求（application/x-www-form-urlencoded）
+   */
+  async postFetch(url, params) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: params.toString(),
+      credentials: 'include'
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.text();
+  }
+
+  /**
+   * 透過 GET 發送請求（查詢字串）
+   */
+  async getFetch(url, params) {
+    const fullUrl = `${url}?${params.toString()}`;
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'include'
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.text();
   }
 
   /**
@@ -144,61 +212,54 @@ class NkustApiService {
     
     // 首選：SimplifiedCourseSelectionInfo (選課人數資訊端點)
     let url = this.config.ENDPOINTS.simplifiedInfo;
-    let bodyData = new URLSearchParams();
-    bodyData.append('selCrsno', encodeCrsno);
-    bodyData.append('selSchoolYear', year);
-    bodyData.append('selSemester', semester);
+    let params = this.buildParams(courseData, { year, semester });
 
+    // 嘗試 POST
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: bodyData,
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const html = await response.text();
+      const html = await this.postFetch(url, params);
       return this.parseQuotaHtml(html);
-    } catch (err) {
-      // 備援方案：若 SimplifiedInfo 失敗，嘗試讀取 CourseDetailByAddSelCrs
-      if (courseId) {
-        return this.fetchCourseDetailFallback(courseId);
+    } catch (postErr) {
+      console.warn('[NKUST Highlighter] POST failed, trying GET:', postErr);
+      // 嘗試 GET
+      try {
+        const html = await this.getFetch(url, params);
+        return this.parseQuotaHtml(html);
+      } catch (getErr) {
+        console.warn('[NKUST Highlighter] GET also failed, trying fallback courseDetail:', getErr);
+        // 備援方案：若 SimplifiedInfo 失敗，嘗試讀取 CourseDetailByAddSelCrs
+        if (courseId) {
+          return this.fetchCourseDetailFallback(courseId, { year, semester });
+        }
+        throw new Error(`Both POST and GET failed: POST ${postErr.message}, GET ${getErr.message}`);
       }
-      throw err;
     }
   }
 
   /**
    * 備援方案：嘗試以 CourseDetailByAddSelCrs 取得課程限修條件
    */
-  async fetchCourseDetailFallback(courseId) {
+  async fetchCourseDetailFallback(courseId, { year, semester }) {
     const url = this.config.ENDPOINTS.courseDetail;
-    const bodyData = new URLSearchParams();
-    bodyData.append('id', courseId);
+    let params = new URLSearchParams();
+    params.append('id', courseId);
+    // 也加入學年學期（有些端點可能需要）
+    params.append('selSchoolYear', year);
+    params.append('selSemester', semester);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: bodyData,
-      credentials: 'include'
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    // 嘗試 POST
+    try {
+      const html = await this.postFetch(url, params);
+      return this.parseQuotaHtml(html);
+    } catch (postErr) {
+      console.warn('[NKUST Highlighter] CourseDetail POST failed, trying GET:', postErr);
+      // 嘗試 GET
+      try {
+        const html = await this.getFetch(url, params);
+        return this.parseQuotaHtml(html);
+      } catch (getErr) {
+        throw new Error(`CourseDetail both POST and GET failed: POST ${postErr.message}, GET ${getErr.message}`);
+      }
     }
-
-    const html = await response.text();
-    return this.parseQuotaHtml(html);
   }
 
   /**
@@ -307,36 +368,36 @@ class NkustApiService {
     }
 
     // 4. 計算剩餘名額
-    if (remaining === null && capacity !== null && enrolled !== null) {
-      remaining = capacity - reserved - enrolled;
-    }
+   if (remaining === null && capacity !== null && enrolled !== null) {
+     remaining = capacity - reserved - enrolled;
+   }
 
-    // 5. 判斷狀態
-    let status = this.config.STATUS.UNAVAILABLE;
-    const threshold = this.config.DEFAULTS.lowQuotaThreshold;
+   // 5. 判斷狀態
+   let status = this.config.STATUS.UNAVAILABLE;
+   const threshold = this.config.DEFAULTS.lowQuotaThreshold;
 
-    if (remaining !== null) {
-      if (remaining <= 0) {
-        status = this.config.STATUS.FULL;
-      } else if (remaining <= threshold) {
-        status = this.config.STATUS.LOW;
-      } else {
-        status = this.config.STATUS.AVAILABLE;
-      }
-    } else if (html.includes('額滿')) {
-      status = this.config.STATUS.FULL;
-      remaining = 0;
-    }
+   if (remaining !== null) {
+     if (remaining <= 0) {
+       status = this.config.STATUS.FULL;
+     } else if (remaining <= threshold) {
+       status = this.config.STATUS.LOW;
+     } else {
+       status = this.config.STATUS.AVAILABLE;
+     }
+   } else if (html.includes('額滿')) {
+     status = this.config.STATUS.FULL;
+     remaining = 0;
+   }
 
-    return {
-      capacity,
-      reserved,
-      enrolled,
-      remaining,
-      status,
-      rawHtml: html
-    };
-  }
+   return {
+     capacity,
+     reserved,
+     enrolled,
+     remaining,
+     status,
+     rawHtml: html
+   };
+ }
 
   /**
    * 本地測試輔助方法：根據當前 HTML 檔案中的資料或課號模擬不同名額狀態
