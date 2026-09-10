@@ -1,4 +1,5 @@
 # 高科大選課系統「名額顏色提示」瀏覽器插件
+![開發中](https://img.shields.io/badge/status-開發中-yellow)
 > **NKUST Course Quota Highlighter** (Chrome / Edge Extension - Manifest V3)
 
 本擴充功能專為國立高雄科技大學（NKUST）新版選課系統設計。針對新系統不再直接標記名額狀態、必須逐一點進課程才能確認餘額的痛點，透過安全、非破壞性的方式在課程列表自動還原舊系統的直覺顏色指標與名額標籤，大幅提升選課瀏覽效率。
