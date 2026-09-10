@@ -138,6 +138,67 @@ class NkustUiHighlighter {
       if (badge) badge.remove();
     });
   }
+
+  /**
+   * 顯示或更新選課頁面上的輕量級刷新指示器 (無遮蔽非阻擋懸浮標籤)
+   * @param {number} current - 目前已完成查詢的課程數
+   * @param {number} total - 本次需查詢的總課程數
+   */
+  showRefreshProgress(current, total) {
+    let indicator = document.querySelector('.nkust-refresh-indicator');
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.className = 'nkust-refresh-indicator nkust-indicator-loading';
+      document.body.appendChild(indicator);
+    }
+
+    indicator.classList.remove('nkust-indicator-complete', 'nkust-indicator-warning', 'nkust-indicator-hide');
+    indicator.classList.add('nkust-indicator-loading');
+
+    const progressText = (typeof current === 'number' && typeof total === 'number' && total > 0)
+      ? ` ${current} / ${total}`
+      : '';
+
+    indicator.innerHTML = `
+      <span class="nkust-indicator-icon nkust-spin">🔄</span>
+      <span class="nkust-indicator-text">正在更新名額…${progressText}</span>
+    `;
+  }
+
+  /**
+   * 刷新完成通知 (自動淡出，不阻礙使用者選課操作)
+   * @param {boolean} hasErrors - 是否有部分課程查詢失敗
+   */
+  showRefreshComplete(hasErrors = false) {
+    const indicator = document.querySelector('.nkust-refresh-indicator');
+    if (!indicator) return;
+
+    indicator.classList.remove('nkust-indicator-loading');
+
+    if (hasErrors) {
+      indicator.classList.add('nkust-indicator-warning');
+      indicator.innerHTML = `
+        <span class="nkust-indicator-icon">⚠</span>
+        <span class="nkust-indicator-text">名額更新完成，但部分課程查詢失敗</span>
+      `;
+    } else {
+      indicator.classList.add('nkust-indicator-complete');
+      indicator.innerHTML = `
+        <span class="nkust-indicator-icon">✓</span>
+        <span class="nkust-indicator-text">名額已更新</span>
+      `;
+    }
+
+    clearTimeout(this._indicatorTimer);
+    this._indicatorTimer = setTimeout(() => {
+      indicator.classList.add('nkust-indicator-hide');
+      setTimeout(() => {
+        if (indicator.parentNode) {
+          indicator.parentNode.removeChild(indicator);
+        }
+      }, 350);
+    }, hasErrors ? 2500 : 1500);
+  }
 }
 
 window.nkustUiHighlighter = new NkustUiHighlighter();

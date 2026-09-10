@@ -12,6 +12,9 @@ class NkustApiService {
     this.queue = [];
     this.activeRequests = 0;
     this.isProcessing = false;
+
+    // 進行中的請求中斷控制器集合
+    this.activeControllers = new Set();
     
     // 設定參考
     this.config = window.NKUST_CONFIG;
@@ -67,6 +70,20 @@ class NkustApiService {
   }
 
   /**
+   * 取消目前正在發送與處理中的所有 active requests (使用 AbortController)
+   */
+  cancelActiveRequests() {
+    for (const controller of this.activeControllers) {
+      try {
+        controller.abort();
+      } catch (e) {
+        // 忽略單一取消失敗
+      }
+    }
+    this.activeControllers.clear();
+  }
+
+  /**
    * 取得當前學年與學期（嘗試多種選擇器以增加容錯性）
    */
   getAcademicYearAndSemester() {
@@ -112,7 +129,7 @@ class NkustApiService {
   /**
    * 透過 POST 發送請求（application/x-www-form-urlencoded）
    */
-  async postFetch(url, params) {
+  async postFetch(url, params, signal) {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -120,7 +137,8 @@ class NkustApiService {
         'X-Requested-With': 'XMLHttpRequest'
       },
       body: params.toString(),
-      credentials: 'include'
+      credentials: 'include',
+      signal
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -131,14 +149,15 @@ class NkustApiService {
   /**
    * 透過 GET 發送請求（查詢字串）
    */
-  async getFetch(url, params) {
+  async getFetch(url, params, signal) {
     const fullUrl = `${url}?${params.toString()}`;
     const response = await fetch(fullUrl, {
       method: 'GET',
       headers: {
         'X-Requested-With': 'XMLHttpRequest'
       },
-      credentials: 'include'
+      credentials: 'include',
+      signal
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -197,7 +216,7 @@ class NkustApiService {
   }
 
   /**
-   * 執行佇列處理器 (受最大並發數與間隔節流保護，依優先序依序取出)
+   * 執行佇列處理器 (受最大並發數與間隔節流保護，依優先序依序取出，支援中斷)
    */
   async processQueue() {
     if (this.isProcessing) return;
@@ -213,15 +232,23 @@ class NkustApiService {
       const task = this.queue.shift();
       this.activeRequests++;
 
-      this.fetchQuota(task.courseData)
+      const controller = new AbortController();
+      this.activeControllers.add(controller);
+
+      this.fetchQuota(task.courseData, controller.signal)
         .then(result => {
-          // 成功取得且非 ERROR 狀態時寫入快取；若為 ERROR 則不快取，允許後續重試
+          // 若請求已被中斷取消，不寫入快取也不觸發回呼
+          if (controller.signal.aborted) return;
           if (result && result.status !== this.config.STATUS.ERROR) {
             this.setCached(task.cacheKey, result);
           }
           task.onResult(result);
         })
         .catch(err => {
+          // 若為手動刷新觸發的取消，靜默忽略，不顯示為錯誤也不污染新查詢結果
+          if (controller.signal.aborted || (err && (err.name === 'AbortError' || err.message?.includes('aborted')))) {
+            return;
+          }
           console.warn('[NKUST Highlighter] 取得名額失敗:', task.cacheKey, err);
           const failResult = {
             status: this.config.STATUS.ERROR,
@@ -233,6 +260,7 @@ class NkustApiService {
           task.onResult(failResult);
         })
         .finally(() => {
+          this.activeControllers.delete(controller);
           this.activeRequests--;
           // 延遲後繼續處理下一個，防止突發大量請求衝擊校務系統
           setTimeout(() => {
@@ -246,9 +274,9 @@ class NkustApiService {
   }
 
   /**
-   * 核心請求方法：向學校伺服器索取名額 HTML 片段並解析
+   * 核心請求方法：向學校伺服器索取名額 HTML 片段並解析 (支援 signal)
    */
-  async fetchQuota(courseData) {
+  async fetchQuota(courseData, signal) {
     const { encodeCrsno, courseId, crsno, courseName } = courseData;
     const isLocalFile = window.location.protocol === 'file:';
 
@@ -265,19 +293,21 @@ class NkustApiService {
 
     // 嘗試 POST
     try {
-      const html = await this.postFetch(url, params);
+      const html = await this.postFetch(url, params, signal);
       return this.parseQuotaHtml(html);
     } catch (postErr) {
+      if (signal && signal.aborted) throw postErr;
       console.warn('[NKUST Highlighter] POST failed, trying GET:', postErr);
       // 嘗試 GET
       try {
-        const html = await this.getFetch(url, params);
+        const html = await this.getFetch(url, params, signal);
         return this.parseQuotaHtml(html);
       } catch (getErr) {
+        if (signal && signal.aborted) throw getErr;
         console.warn('[NKUST Highlighter] GET also failed, trying fallback courseDetail:', getErr);
         // 備援方案：若 SimplifiedInfo 失敗，嘗試讀取 CourseDetailByAddSelCrs
         if (courseId) {
-          return this.fetchCourseDetailFallback(courseId, { year, semester });
+          return this.fetchCourseDetailFallback(courseId, { year, semester }, signal);
         }
         throw new Error(`Both POST and GET failed: POST ${postErr.message}, GET ${getErr.message}`);
       }
@@ -285,9 +315,9 @@ class NkustApiService {
   }
 
   /**
-   * 備援方案：嘗試以 CourseDetailByAddSelCrs 取得課程限修條件
+   * 備援方案：嘗試以 CourseDetailByAddSelCrs 取得課程限修條件 (支援 signal)
    */
-  async fetchCourseDetailFallback(courseId, { year, semester }) {
+  async fetchCourseDetailFallback(courseId, { year, semester }, signal) {
     const url = this.config.ENDPOINTS.courseDetail;
     let params = new URLSearchParams();
     params.append('id', courseId);
@@ -297,13 +327,14 @@ class NkustApiService {
 
     // 嘗試 POST
     try {
-      const html = await this.postFetch(url, params);
+      const html = await this.postFetch(url, params, signal);
       return this.parseQuotaHtml(html);
     } catch (postErr) {
+      if (signal && signal.aborted) throw postErr;
       console.warn('[NKUST Highlighter] CourseDetail POST failed, trying GET:', postErr);
       // 嘗試 GET
       try {
-        const html = await this.getFetch(url, params);
+        const html = await this.getFetch(url, params, signal);
         return this.parseQuotaHtml(html);
       } catch (getErr) {
         throw new Error(`CourseDetail both POST and GET failed: POST ${postErr.message}, GET ${getErr.message}`);

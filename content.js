@@ -124,6 +124,9 @@
 
         apiService.enqueue(courseData, (result) => {
           uiHighlighter.highlightRow(row, { ...result, isTarget });
+          if (typeof options.onTaskFinished === 'function') {
+            options.onTaskFinished(result, courseData);
+          }
         }, priority);
       } else {
         // Hover 模式：滑鼠移過人數圖示才載入
@@ -189,7 +192,7 @@
 
   /**
    * 建立 MutationObserver 監聽動態表格變更 (換頁、搜尋、筆數切換)
-   * 增加自我防護，忽略自身添加的 Badge，避免無限觸發
+   * 增加自我防護，忽略自身添加的 Badge 與 Refresh Indicator，避免無限觸發
    */
   function setupMutationObserver() {
     const targetNode = document.querySelector(config.SELECTORS.gridContainer) || document.body;
@@ -201,8 +204,13 @@
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
           for (const node of mutation.addedNodes) {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              // 忽略插件自產的 Badge 與狀態標籤
-              if (node.classList && (node.classList.contains('nkust-quota-badge') || node.querySelector('.nkust-quota-badge'))) {
+              // 忽略插件自產的 Badge、狀態標籤與刷新指示器
+              if (node.classList && (
+                node.classList.contains('nkust-quota-badge') ||
+                node.classList.contains('nkust-refresh-indicator') ||
+                node.querySelector('.nkust-quota-badge') ||
+                node.querySelector('.nkust-refresh-indicator')
+              )) {
                 continue;
               }
               if (node.matches && (node.matches('tr') || node.querySelector('tr') || node.matches('.k-grid-table'))) {
@@ -247,17 +255,51 @@
           scanAndProcessCourses();
           sendResponse({ success: true });
         } else if (request.type === 'REFRESH_QUOTAS' || request.type === 'CLEAR_CACHE') {
-          // 手動更新名額：清空快取、清空舊佇列、重設 DOM 狀態並立即以高優先度重查
-          apiService.clearCache();
+          // 1. 取消目前所有 active requests (使用 AbortController 防止新舊競爭)
+          apiService.cancelActiveRequests();
+          // 2. 清空待辦排隊佇列
           apiService.clearQueue();
+          // 3. 清空記憶體快取
+          apiService.clearCache();
 
-          document.querySelectorAll(config.SELECTORS.courseRows).forEach(row => {
+          // 4. 重設 DOM 處理標籤
+          const allRows = document.querySelectorAll(config.SELECTORS.courseRows);
+          allRows.forEach(row => {
             row.removeAttribute('data-nkust-processed');
           });
-          scanAndProcessCourses({ forceRefresh: true, isManualRefresh: true });
 
-          const rowCount = document.querySelectorAll(config.SELECTORS.courseRows).length;
-          sendResponse({ success: true, count: rowCount });
+          // 計算有效課程列總數，並啟動頁面刷新指示器
+          const validRows = Array.from(allRows).filter(row => {
+            const d = extractCourseDataFromRow(row);
+            return !!(d.encodeCrsno || d.crsno || d.courseId);
+          });
+          const total = validRows.length;
+          let completed = 0;
+          let hasErrors = false;
+
+          if (total > 0) {
+            uiHighlighter.showRefreshProgress(0, total);
+          } else {
+            uiHighlighter.showRefreshComplete(false);
+          }
+
+          // 5. 立即以最高優先度重新查詢名額，並更新進度
+          scanAndProcessCourses({
+            forceRefresh: true,
+            isManualRefresh: true,
+            onTaskFinished: (result) => {
+              completed++;
+              if (result && result.status === config.STATUS.ERROR) {
+                hasErrors = true;
+              }
+              uiHighlighter.showRefreshProgress(completed, total);
+              if (completed >= total) {
+                uiHighlighter.showRefreshComplete(hasErrors);
+              }
+            }
+          });
+
+          sendResponse({ success: true, count: total });
         }
         return true;
       });
