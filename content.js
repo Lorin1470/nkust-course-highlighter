@@ -13,6 +13,8 @@
   let currentSettings = { ...config.DEFAULTS };
   let observer = null;
   let debounceTimer = null;
+  let refreshSafetyTimer = null;
+  let refreshGeneration = 0;
 
   /**
    * 初始化設定並啟動監聽
@@ -276,9 +278,21 @@
           const total = validRows.length;
           let completed = 0;
           let hasErrors = false;
+          let isFinished = false;
+          const currentGen = ++refreshGeneration;
+
+          clearTimeout(refreshSafetyTimer);
 
           if (total > 0) {
             uiHighlighter.showRefreshProgress(0, total);
+
+            // 安全超時保護：避免伺服器無回應、網路斷線或 DOM 變異導致指示器永久卡住
+            refreshSafetyTimer = setTimeout(() => {
+              if (currentGen === refreshGeneration && !isFinished) {
+                isFinished = true;
+                uiHighlighter.showRefreshComplete(true);
+              }
+            }, 15000);
           } else {
             uiHighlighter.showRefreshComplete(false);
           }
@@ -288,12 +302,15 @@
             forceRefresh: true,
             isManualRefresh: true,
             onTaskFinished: (result) => {
+              if (currentGen !== refreshGeneration || isFinished) return;
               completed++;
               if (result && result.status === config.STATUS.ERROR) {
                 hasErrors = true;
               }
               uiHighlighter.showRefreshProgress(completed, total);
               if (completed >= total) {
+                isFinished = true;
+                clearTimeout(refreshSafetyTimer);
                 uiHighlighter.showRefreshComplete(hasErrors);
               }
             }

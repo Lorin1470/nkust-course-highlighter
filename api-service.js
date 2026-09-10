@@ -15,6 +15,10 @@ class NkustApiService {
 
     // 進行中的請求中斷控制器集合
     this.activeControllers = new Set();
+    // 進行中的任務映射 (cacheKey -> task)
+    this.activeTasks = new Map();
+    // 學年期快取避免重複查詢 DOM 與重複 log
+    this._cachedAcademic = null;
     
     // 設定參考
     this.config = window.NKUST_CONFIG;
@@ -37,6 +41,15 @@ class NkustApiService {
       this.cache.delete(key);
       return null;
     }
+
+    // 動態根據當前 lowQuotaThreshold 更新狀態 (若有確切剩餘名額且非不可選)
+    if (item.remaining !== null && item.remaining > 0 && item.capacity !== 0) {
+      const threshold = (settings && settings.lowQuotaThreshold) || 5;
+      item.status = item.remaining <= threshold
+        ? this.config.STATUS.LOW
+        : this.config.STATUS.AVAILABLE;
+    }
+
     return item;
   }
 
@@ -59,6 +72,7 @@ class NkustApiService {
       keys.forEach(k => this.cache.delete(k));
     } else {
       this.cache.clear();
+      this._cachedAcademic = null;
     }
   }
 
@@ -81,12 +95,17 @@ class NkustApiService {
       }
     }
     this.activeControllers.clear();
+    this.activeTasks.clear();
   }
 
   /**
    * 取得當前學年與學期（嘗試多種選擇器以增加容錯性）
    */
   getAcademicYearAndSemester() {
+    if (this._cachedAcademic) {
+      return this._cachedAcademic;
+    }
+
     const yearSel = [
       '#SchoolYear',
       '[name="SchoolYear"]',
@@ -112,7 +131,8 @@ class NkustApiService {
     const year = yearEl ? yearEl.value : '115';
     const semester = semEl ? semEl.value : '1';
     console.log('[NKUST Highlighter] Academic year:', year, 'semester:', semester);
-    return { year, semester };
+    this._cachedAcademic = { year, semester };
+    return this._cachedAcademic;
   }
 
   /**
@@ -179,7 +199,9 @@ class NkustApiService {
     // 若已有快取且未過期，直接回傳
     const cached = this.getCached(cacheKey);
     if (cached) {
-      onResult(cached);
+      if (typeof onResult === 'function') {
+        onResult(cached);
+      }
       return;
     }
 
@@ -188,13 +210,24 @@ class NkustApiService {
       ? (priority ? (this.config.PRIORITY?.MANUAL || 1) : (this.config.PRIORITY?.NORMAL || 3))
       : (Number(priority) || 3);
 
-    // 檢查佇列中是否已有該課號
-    const existingIndex = this.queue.findIndex(item => item.cacheKey === cacheKey);
-    if (existingIndex !== -1) {
-      // 若新請求優先級更高 (數字更小)，升級該任務並重新排序
-      if (prio < this.queue[existingIndex].priority) {
-        this.queue[existingIndex].priority = prio;
+    // 1. 若佇列中已有該課號排隊，附加回呼並升級優先級 (避免漏掉 task 回呼與重複請求)
+    const existingTask = this.queue.find(item => item.cacheKey === cacheKey);
+    if (existingTask) {
+      if (typeof onResult === 'function') {
+        existingTask.callbacks.push(onResult);
+      }
+      if (prio < existingTask.priority) {
+        existingTask.priority = prio;
         this.queue.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
+      }
+      return;
+    }
+
+    // 2. 若該課號正在向伺服器請求中 (in-flight)，附加回呼，等候完成時一併通知
+    const inFlightTask = this.activeTasks.get(cacheKey);
+    if (inFlightTask) {
+      if (typeof onResult === 'function') {
+        inFlightTask.callbacks.push(onResult);
       }
       return;
     }
@@ -202,10 +235,9 @@ class NkustApiService {
     const task = {
       courseData,
       cacheKey,
-      onResult,
+      callbacks: typeof onResult === 'function' ? [onResult] : [],
       priority: prio,
-      createdAt: Date.now(),
-      retries: 0
+      createdAt: Date.now()
     };
 
     // 依優先級 (升冪) 與 建立時間 排序插入
@@ -218,59 +250,74 @@ class NkustApiService {
   /**
    * 執行佇列處理器 (受最大並發數與間隔節流保護，依優先序依序取出，支援中斷)
    */
-  async processQueue() {
+  processQueue() {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
-    const settings = (this.config && this.config.getSettings)
-      ? this.config.getSettings()
-      : (this.config ? this.config.DEFAULTS : {});
-    const maxConcurrency = (settings && settings.maxConcurrency) || 3;
-    const delayMs = (settings && settings.requestDelayMs) || 60;
+    try {
+      const settings = (this.config && this.config.getSettings)
+        ? this.config.getSettings()
+        : (this.config ? this.config.DEFAULTS : {});
+      const maxConcurrency = (settings && settings.maxConcurrency) || 3;
+      const delayMs = (settings && settings.requestDelayMs) || 60;
 
-    while (this.queue.length > 0 && this.activeRequests < maxConcurrency) {
-      const task = this.queue.shift();
-      this.activeRequests++;
+      while (this.queue.length > 0 && this.activeRequests < maxConcurrency) {
+        const task = this.queue.shift();
+        this.activeRequests++;
+        this.activeTasks.set(task.cacheKey, task);
 
-      const controller = new AbortController();
-      this.activeControllers.add(controller);
+        const controller = new AbortController();
+        this.activeControllers.add(controller);
 
-      this.fetchQuota(task.courseData, controller.signal)
-        .then(result => {
-          // 若請求已被中斷取消，不寫入快取也不觸發回呼
-          if (controller.signal.aborted) return;
-          if (result && result.status !== this.config.STATUS.ERROR) {
-            this.setCached(task.cacheKey, result);
-          }
-          task.onResult(result);
-        })
-        .catch(err => {
-          // 若為手動刷新觸發的取消，靜默忽略，不顯示為錯誤也不污染新查詢結果
-          if (controller.signal.aborted || (err && (err.name === 'AbortError' || err.message?.includes('aborted')))) {
-            return;
-          }
-          console.warn('[NKUST Highlighter] 取得名額失敗:', task.cacheKey, err);
-          const failResult = {
-            status: this.config.STATUS.ERROR,
-            remaining: null,
-            capacity: null,
-            enrolled: null,
-            error: err.message || '伺服器回應異常或連線中斷'
-          };
-          task.onResult(failResult);
-        })
-        .finally(() => {
-          this.activeControllers.delete(controller);
-          this.activeRequests--;
-          // 延遲後繼續處理下一個，防止突發大量請求衝擊校務系統
-          setTimeout(() => {
-            this.isProcessing = false;
-            this.processQueue();
-          }, delayMs);
-        });
+        this.fetchQuota(task.courseData, controller.signal)
+          .then(result => {
+            // 若請求已被中斷取消，不寫入快取也不觸發回呼
+            if (controller.signal.aborted) return;
+            if (result && result.status !== this.config.STATUS.ERROR) {
+              this.setCached(task.cacheKey, result);
+            }
+            task.callbacks.forEach(cb => {
+              try {
+                cb(result);
+              } catch (e) {
+                console.error('[NKUST Highlighter] Callback execution error:', e);
+              }
+            });
+          })
+          .catch(err => {
+            // 若為手動刷新觸發的取消，靜默忽略，不顯示為錯誤也不污染新查詢結果
+            if (controller.signal.aborted || (err && (err.name === 'AbortError' || err.message?.includes('aborted')))) {
+              return;
+            }
+            console.warn('[NKUST Highlighter] 取得名額失敗:', task.cacheKey, err);
+            const failResult = {
+              status: this.config.STATUS.ERROR,
+              remaining: null,
+              capacity: null,
+              enrolled: null,
+              error: err.message || '伺服器回應異常或連線中斷'
+            };
+            task.callbacks.forEach(cb => {
+              try {
+                cb(failResult);
+              } catch (e) {
+                console.error('[NKUST Highlighter] Callback error on failure:', e);
+              }
+            });
+          })
+          .finally(() => {
+            this.activeControllers.delete(controller);
+            this.activeTasks.delete(task.cacheKey);
+            this.activeRequests = Math.max(0, this.activeRequests - 1);
+            // 延遲後繼續處理下一個，防止突發大量請求衝擊校務系統
+            setTimeout(() => {
+              this.processQueue();
+            }, delayMs);
+          });
+      }
+    } finally {
+      this.isProcessing = false;
     }
-
-    this.isProcessing = false;
   }
 
   /**
@@ -296,14 +343,14 @@ class NkustApiService {
       const html = await this.postFetch(url, params, signal);
       return this.parseQuotaHtml(html);
     } catch (postErr) {
-      if (signal && signal.aborted) throw postErr;
+      if ((signal && signal.aborted) || postErr.name === 'AbortError') throw postErr;
       console.warn('[NKUST Highlighter] POST failed, trying GET:', postErr);
       // 嘗試 GET
       try {
         const html = await this.getFetch(url, params, signal);
         return this.parseQuotaHtml(html);
       } catch (getErr) {
-        if (signal && signal.aborted) throw getErr;
+        if ((signal && signal.aborted) || getErr.name === 'AbortError') throw getErr;
         console.warn('[NKUST Highlighter] GET also failed, trying fallback courseDetail:', getErr);
         // 備援方案：若 SimplifiedInfo 失敗，嘗試讀取 CourseDetailByAddSelCrs
         if (courseId) {
@@ -330,13 +377,14 @@ class NkustApiService {
       const html = await this.postFetch(url, params, signal);
       return this.parseQuotaHtml(html);
     } catch (postErr) {
-      if (signal && signal.aborted) throw postErr;
+      if ((signal && signal.aborted) || postErr.name === 'AbortError') throw postErr;
       console.warn('[NKUST Highlighter] CourseDetail POST failed, trying GET:', postErr);
       // 嘗試 GET
       try {
         const html = await this.getFetch(url, params, signal);
         return this.parseQuotaHtml(html);
       } catch (getErr) {
+        if ((signal && signal.aborted) || getErr.name === 'AbortError') throw getErr;
         throw new Error(`CourseDetail both POST and GET failed: POST ${postErr.message}, GET ${getErr.message}`);
       }
     }

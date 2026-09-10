@@ -17,7 +17,7 @@ class NkustUiHighlighter {
     // 清除既有狀態 class
     this.clearRowStatus(rowElement);
 
-    const { status, remaining, capacity, enrolled, isMock, isTarget } = quotaInfo;
+    const { status, remaining, capacity, enrolled, reserved, isMock, isTarget } = quotaInfo;
 
     // 1. 為 <tr> 附加狀態樣式 Class
     rowElement.classList.add(`nkust-status-${status}`);
