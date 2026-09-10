@@ -369,7 +369,7 @@ class NkustApiService {
 
     // 4. 計算剩餘名額
    if (remaining === null && capacity !== null && enrolled !== null) {
-     remaining = capacity - reserved - enrolled;
+     remaining = capacity - enrolled;
    }
 
    // 5. 判斷狀態
