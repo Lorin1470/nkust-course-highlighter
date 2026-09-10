@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>選課名額顏色提示設定</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="header">
+      <div class="title-row">
+        <span class="logo-dot"></span>
+        <h1>高科大選課名額提示</h1>
+      </div>
+      <p class="subtitle">NKUST Course Quota Highlighter</p>
+    </header>
+
+    <section class="section">
+      <div class="legend-card">
+        <div class="legend-item">
+          <span class="color-badge badge-green"></span>
+          <span class="legend-label">有名額 (剩餘充裕)</span>
+        </div>
+        <div class="legend-item">
+          <span class="color-badge badge-yellow"></span>
+          <span class="legend-label">名額少 (即將額滿)</span>
+        </div>
+        <div class="legend-item">
+          <span class="color-badge badge-red"></span>
+          <span class="legend-label">已額滿 (剩餘 0)</span>
+        </div>
+        <div class="legend-item">
+          <span class="color-badge badge-gray"></span>
+          <span class="legend-label">停開 / 不可選</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="form-group">
+        <label for="fetchMode" class="form-label">查詢載入模式</label>
+        <select id="fetchMode" class="form-select">
+          <option value="auto">自動排隊載入 (預設，每頁限速安全查詢)</option>
+          <option value="hover">滑鼠移至圖示才查詢 (最省伺服器資源)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <div class="label-row">
+          <label for="lowQuotaThreshold" class="form-label">名額緊繃警示門檻</label>
+          <span id="thresholdValue" class="threshold-display">5 人以下</span>
+        </div>
+        <input type="range" id="lowQuotaThreshold" min="1" max="15" value="5" class="form-slider">
+        <p class="form-hint">剩餘名額小於等於此數值時顯示橘黃色。</p>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <button id="btnRefresh" class="btn btn-secondary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        重新整理 / 清除快取
+      </button>
+      <div id="saveNotice" class="save-notice">設定已自動生效</div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
