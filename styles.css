@@ -37,7 +37,7 @@ tr.nkust-status-full:hover {
   background-color: rgba(220, 38, 38, 0.13) !important;
 }
 
-/* 4. 停開/不可選/異常 (灰色，Unavailable) */
+/* 4. 停開/不可選 (深灰色，Unavailable) */
 tr.nkust-status-unavailable {
   border-left: 5px solid #9ca3af !important;
   background-color: rgba(156, 163, 175, 0.05) !important;
@@ -51,6 +51,21 @@ tr.nkust-status-unavailable:hover {
 tr.nkust-status-loading {
   border-left: 5px solid #38bdf8 !important;
   background-color: rgba(56, 189, 248, 0.04) !important;
+}
+
+/* 6. 查詢失敗 / 伺服器異常 (灰藍色，Error) */
+tr.nkust-status-error {
+  border-left: 5px solid #64748b !important;
+  background-color: rgba(100, 116, 139, 0.05) !important;
+  transition: background-color 0.2s ease, border-left-color 0.2s ease;
+}
+tr.nkust-status-error:hover {
+  background-color: rgba(100, 116, 139, 0.10) !important;
+}
+
+/* 目標追蹤課程外框標註 (金色微光) */
+tr.nkust-row-target {
+  box-shadow: inset 3px 0 0 #f59e0b, inset 0 0 0 1px rgba(245, 158, 11, 0.35) !important;
 }
 
 /* 限修或不可選之附加外觀 */
@@ -75,6 +90,8 @@ tr.nkust-row-disabled {
   white-space: nowrap;
   letter-spacing: 0.2px;
   user-select: none;
+  cursor: help;
+  pointer-events: auto; /* 允許滑鼠懸停顯示原生 Tooltip 說明 */
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -104,11 +121,24 @@ tr.nkust-row-disabled {
   border: 1px solid #fca5a5;
 }
 
-/* 灰色 Badge */
+/* 停開/不可選 Badge (深灰色) */
 .nkust-badge-unavailable {
   background-color: #f3f4f6;
   color: #4b5563;
   border: 1px solid #d1d5db;
+}
+
+/* 查詢失敗 Badge (灰藍冷色，避免與停開或額滿混淆) */
+.nkust-badge-error {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+/* 目標課程 Badge 邊框強調 */
+.nkust-badge-target {
+  border-color: #f59e0b !important;
+  font-weight: 700;
 }
 
 /* 載入中 Badge 動畫 */

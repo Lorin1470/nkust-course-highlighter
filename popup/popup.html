@@ -20,11 +20,11 @@
       <div class="legend-card">
         <div class="legend-item">
           <span class="color-badge badge-green"></span>
-          <span class="legend-label">有名額 (剩餘充裕)</span>
+          <span class="legend-label">有名額 (充裕)</span>
         </div>
         <div class="legend-item">
           <span class="color-badge badge-yellow"></span>
-          <span class="legend-label">名額少 (即將額滿)</span>
+          <span class="legend-label">名額少 (緊繃)</span>
         </div>
         <div class="legend-item">
           <span class="color-badge badge-red"></span>
@@ -33,6 +33,14 @@
         <div class="legend-item">
           <span class="color-badge badge-gray"></span>
           <span class="legend-label">停開 / 不可選</span>
+        </div>
+        <div class="legend-item">
+          <span class="color-badge badge-slate"></span>
+          <span class="legend-label">查詢失敗</span>
+        </div>
+        <div class="legend-item">
+          <span class="color-badge badge-gold"></span>
+          <span class="legend-label">🎯 目標課程</span>
         </div>
       </div>
     </section>
@@ -47,6 +55,22 @@
       </div>
 
       <div class="form-group">
+        <label for="cacheTTLSec" class="form-label">快取時效 / 搶課模式</label>
+        <select id="cacheTTLSec" class="form-select">
+          <option value="20">一般瀏覽 (快取 20 秒，推薦)</option>
+          <option value="3">搶課模式 (快取 3 秒，高頻即時刷新)</option>
+          <option value="60">節能模式 (快取 60 秒，減少請求)</option>
+        </select>
+        <p class="form-hint">搶課時建議切換為 3 秒快取，以獲取即時名額變動。</p>
+      </div>
+
+      <div class="form-group">
+        <label for="targetCourses" class="form-label">🎯 目標課號追蹤 (最高優先權)</label>
+        <input type="text" id="targetCourses" class="form-input" placeholder="例: 0314, 1843 (逗號或空格分隔)">
+        <p class="form-hint">追蹤課程將享有最優先插隊查詢並標示 🎯。</p>
+      </div>
+
+      <div class="form-group">
         <div class="label-row">
           <label for="lowQuotaThreshold" class="form-label">名額緊繃警示門檻</label>
           <span id="thresholdValue" class="threshold-display">5 人以下</span>
@@ -57,9 +81,9 @@
     </section>
 
     <footer class="footer">
-      <button id="btnRefresh" class="btn btn-secondary">
+      <button id="btnRefresh" class="btn btn-primary">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-        重新整理 / 清除快取
+        🔄 立即更新名額 (重新查詢)
       </button>
       <div id="saveNotice" class="save-notice">設定已自動生效</div>
     </footer>

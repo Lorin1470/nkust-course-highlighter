@@ -80,6 +80,8 @@ h1 {
 .badge-yellow { background-color: #d97706; }
 .badge-red { background-color: #dc2626; }
 .badge-gray { background-color: #9ca3af; }
+.badge-slate { background-color: #64748b; }
+.badge-gold { background-color: #f59e0b; }
 
 .legend-label {
   font-size: 11px;
@@ -111,7 +113,8 @@ h1 {
   color: #d97706;
 }
 
-.form-select {
+.form-select,
+.form-input {
   width: 100%;
   padding: 6px 8px;
   border: 1px solid #cbd5e1;
@@ -120,11 +123,16 @@ h1 {
   background-color: #ffffff;
   color: #1e293b;
   outline: none;
+}
+
+.form-select {
   cursor: pointer;
 }
 
-.form-select:focus {
+.form-select:focus,
+.form-input:focus {
   border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
 }
 
 .form-slider {
@@ -138,6 +146,7 @@ h1 {
   font-size: 11px;
   color: #64748b;
   margin-top: 4px;
+  line-height: 1.35;
 }
 
 /* 按鈕與頁尾 */
@@ -153,7 +162,7 @@ h1 {
   justify-content: center;
   gap: 6px;
   width: 100%;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
@@ -162,13 +171,36 @@ h1 {
   border: none;
 }
 
+.btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: #0284c7;
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #0369a1;
+}
+
 .btn-secondary {
   background-color: #e2e8f0;
   color: #334155;
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background-color: #cbd5e1;
+}
+
+.nkust-spin {
+  animation: nkust-rotate 1s infinite linear;
+}
+
+@keyframes nkust-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .save-notice {

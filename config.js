@@ -56,23 +56,50 @@ const NKUST_CONFIG = {
     AVAILABLE: 'available',      // 有名額 (綠)
     LOW: 'low',                  // 剩餘名額緊張 (橘黃)
     FULL: 'full',                // 額滿 (紅)
-    UNAVAILABLE: 'unavailable',  // 停開/不可選/異常 (灰)
-    LOADING: 'loading'           // 查詢中
+    UNAVAILABLE: 'unavailable',  // 確定不可選 / 停開 / 容量為 0 (深灰)
+    ERROR: 'error',              // 查詢失敗 / 伺服器異常 / 解析失敗 (灰藍)
+    LOADING: 'loading'           // 查詢中 (淺藍)
   },
 
-  // 預設使用者設定
+  // 查詢優先級定義 (數字越小優先度越高)
+  PRIORITY: {
+    MANUAL: 1,   // 手動更新 / 目標課程 (最高優先)
+    VISIBLE: 2,  // 當前視窗可視範圍內課程
+    NORMAL: 3,   // 頁面其餘自動掃描課程
+    LOW: 4       // 低優先度
+  },
+
+  // 預設使用者設定 (常數，請勿在執行期直接修改)
   DEFAULTS: {
     // 剩餘名額少於或等於此數值時顯示橘黃色警告
     lowQuotaThreshold: 5,
     // 查詢模式: 'auto' (自動為整頁排程載入) 或 'hover' (滑鼠移到人數圖示才載入)
     fetchMode: 'auto',
-    // 請求間隔 (毫秒)，防止對學校伺服器造成高頻負擔
-    requestDelayMs: 120,
-    // 最大並發請求數
-    maxConcurrency: 2,
+    // 請求間隔 (毫秒)，適度節流保護學校伺服器
+    requestDelayMs: 60,
+    // 最大並發請求數 (搶課情境維持適度並發，避免封鎖)
+    maxConcurrency: 3,
+    // 快取有效時間 TTL (秒)；搶課模式可設為 3 秒，一般瀏覽 20 秒
+    cacheTTLSec: 20,
+    // 目標課程課號清單 (最高優先級)，例如 ['0314', '1843']
+    targetCourses: [],
     // 頁面重繪的防抖延遲 (毫秒)
     debounceMs: 250
   }
+};
+
+// Runtime 獨立設定實例 (避免直接污染 DEFAULTS)
+let runtimeSettings = { ...NKUST_CONFIG.DEFAULTS };
+
+NKUST_CONFIG.getSettings = function () {
+  return { ...runtimeSettings };
+};
+
+NKUST_CONFIG.updateSettings = function (newSettings) {
+  if (newSettings && typeof newSettings === 'object') {
+    runtimeSettings = { ...runtimeSettings, ...newSettings };
+  }
+  return { ...runtimeSettings };
 };
 
 // 避免重複定義

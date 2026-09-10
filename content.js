@@ -18,7 +18,7 @@
    * 初始化設定並啟動監聽
    */
   async function init() {
-    console.log('[NKUST Highlighter] 插件已啟動');
+    console.log('[NKUST Highlighter] 插件已啟動 (選課/搶課優化版)');
     
     // 載入使用者偏好設定 (若有)
     await loadSettings();
@@ -41,9 +41,8 @@
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
         chrome.storage.sync.get(config.DEFAULTS, (items) => {
           if (items) {
-            currentSettings = { ...currentSettings, ...items };
-            config.DEFAULTS.lowQuotaThreshold = currentSettings.lowQuotaThreshold;
-            config.DEFAULTS.fetchMode = currentSettings.fetchMode;
+            currentSettings = { ...config.DEFAULTS, ...items };
+            config.updateSettings(currentSettings);
           }
           resolve();
         });
@@ -54,42 +53,81 @@
   }
 
   /**
-   * 掃描並處理當前表格內的所有課程列
+   * 判斷課程列是否在目前螢幕或容器可視範圍內 (提高可見課程的優先序)
    */
-  function scanAndProcessCourses() {
+  function isRowVisible(row) {
+    if (!row || !row.getBoundingClientRect) return false;
+    const rect = row.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return false;
+
+    const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+    const inWindow = rect.top < windowHeight && rect.bottom > 0;
+    if (!inWindow) return false;
+
+    const scrollParent = row.closest('.k-grid-content');
+    if (scrollParent) {
+      const parentRect = scrollParent.getBoundingClientRect();
+      return rect.top < parentRect.bottom && rect.bottom > parentRect.top;
+    }
+    return true;
+  }
+
+  /**
+   * 掃描並處理當前表格內的所有課程列 (支援優先級與手動更新)
+   * @param {Object} options - { forceRefresh: boolean, isManualRefresh: boolean }
+   */
+  function scanAndProcessCourses(options = {}) {
     const rows = document.querySelectorAll(config.SELECTORS.courseRows);
     if (!rows || rows.length === 0) return;
 
-    // 針對每一筆課程進行分析
-    rows.forEach(row => {
-      // 避免重複綁定 hover
-      if (row.getAttribute('data-nkust-processed') === 'true') {
-        const status = row.getAttribute('data-nkust-status');
-        if (status) return; // 已經標註完畢
-      }
+    const settings = config.getSettings ? config.getSettings() : currentSettings;
+    const targetList = Array.isArray(settings.targetCourses) ? settings.targetCourses : [];
 
+    rows.forEach(row => {
       const courseData = extractCourseDataFromRow(row);
       if (!courseData.encodeCrsno && !courseData.crsno && !courseData.courseId) return;
 
-      row.setAttribute('data-nkust-processed', 'true');
-
       const cacheKey = courseData.encodeCrsno || courseData.crsno || courseData.courseId;
-      const cached = apiService.getCached(cacheKey);
+      const isTarget = targetList.includes(courseData.crsno);
 
-      if (cached) {
-        uiHighlighter.highlightRow(row, cached);
-        return;
+      // 若非強制刷新，且快取仍有效，直接使用快取渲染並標記
+      if (!options.forceRefresh) {
+        const cached = apiService.getCached(cacheKey);
+        if (cached) {
+          row.setAttribute('data-nkust-processed', 'true');
+          uiHighlighter.highlightRow(row, { ...cached, isTarget });
+          return;
+        }
+
+        // 若已處理過且快取尚未過期 (防重複掃描)
+        if (row.getAttribute('data-nkust-processed') === 'true' && row.getAttribute('data-nkust-status')) {
+          return;
+        }
       }
 
-      if (currentSettings.fetchMode === 'auto') {
-        // 自動模式：先顯示載入中，並排入安全佇列
-        uiHighlighter.setRowLoading(row);
+      row.setAttribute('data-nkust-processed', 'true');
+
+      // 判定佇列優先級 (數字越小越優先)
+      // 1: 手動觸發 / 目標課程 (最高優先)
+      // 2: 眼前螢幕可見課程 (次高優先)
+      // 3: 頁面其餘課程 (一般)
+      let priority = config.PRIORITY.NORMAL;
+      if (options.isManualRefresh || isTarget) {
+        priority = config.PRIORITY.MANUAL;
+      } else if (isRowVisible(row)) {
+        priority = config.PRIORITY.VISIBLE;
+      }
+
+      if (settings.fetchMode === 'auto' || options.isManualRefresh || isTarget) {
+        // 先顯示載入中狀態 (包含目標課號提示)
+        uiHighlighter.setRowLoading(row, isTarget);
+
         apiService.enqueue(courseData, (result) => {
-          uiHighlighter.highlightRow(row, result);
-        });
+          uiHighlighter.highlightRow(row, { ...result, isTarget });
+        }, priority);
       } else {
-        // Hover 模式：滑鼠移過人數圖示時才即時發送高優先度請求
-        setupHoverTrigger(row, courseData);
+        // Hover 模式：滑鼠移過人數圖示才載入
+        setupHoverTrigger(row, courseData, isTarget);
       }
     });
   }
@@ -128,21 +166,22 @@
   /**
    * 為 Hover 模式設定事件觸發
    */
-  function setupHoverTrigger(row, courseData) {
+  function setupHoverTrigger(row, courseData, isTarget = false) {
     const usersIcon = row.querySelector(config.SELECTORS.usersIcon) || row;
     
     const onHover = () => {
       const cacheKey = courseData.encodeCrsno || courseData.crsno || courseData.courseId;
       const cached = apiService.getCached(cacheKey);
       if (cached) {
-        uiHighlighter.highlightRow(row, cached);
+        uiHighlighter.highlightRow(row, { ...cached, isTarget });
         return;
       }
 
-      uiHighlighter.setRowLoading(row);
+      uiHighlighter.setRowLoading(row, isTarget);
+      // 使用者互動觸發給予最高優先度 MANUAL (1)
       apiService.enqueue(courseData, (result) => {
-        uiHighlighter.highlightRow(row, result);
-      }, true); // 高優先度
+        uiHighlighter.highlightRow(row, { ...result, isTarget });
+      }, config.PRIORITY.MANUAL);
     };
 
     usersIcon.addEventListener('mouseenter', onHover, { once: true });
@@ -150,6 +189,7 @@
 
   /**
    * 建立 MutationObserver 監聽動態表格變更 (換頁、搜尋、筆數切換)
+   * 增加自我防護，忽略自身添加的 Badge，避免無限觸發
    */
   function setupMutationObserver() {
     const targetNode = document.querySelector(config.SELECTORS.gridContainer) || document.body;
@@ -158,10 +198,13 @@
       let shouldScan = false;
 
       for (const mutation of mutations) {
-        // 若有新節點增加或 tbody 內容改變
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
           for (const node of mutation.addedNodes) {
             if (node.nodeType === Node.ELEMENT_NODE) {
+              // 忽略插件自產的 Badge 與狀態標籤
+              if (node.classList && (node.classList.contains('nkust-quota-badge') || node.querySelector('.nkust-quota-badge'))) {
+                continue;
+              }
               if (node.matches && (node.matches('tr') || node.querySelector('tr') || node.matches('.k-grid-table'))) {
                 shouldScan = true;
                 break;
@@ -174,9 +217,10 @@
 
       if (shouldScan) {
         clearTimeout(debounceTimer);
+        const settings = config.getSettings ? config.getSettings() : currentSettings;
         debounceTimer = setTimeout(() => {
           scanAndProcessCourses();
-        }, config.DEFAULTS.debounceMs);
+        }, settings.debounceMs || 250);
       }
     });
 
@@ -194,25 +238,26 @@
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.type === 'SETTINGS_UPDATED') {
           currentSettings = { ...currentSettings, ...request.settings };
-          config.DEFAULTS.lowQuotaThreshold = currentSettings.lowQuotaThreshold;
-          config.DEFAULTS.fetchMode = currentSettings.fetchMode;
+          config.updateSettings(currentSettings);
 
-          // 重新掃描並更新現有畫面的名額狀態
-          uiHighlighter.clearAll();
-          // 重設 processed 狀態以重新著色
+          // 重新掃描並更新現有畫面的名額狀態 (保留有效快取)
           document.querySelectorAll(config.SELECTORS.courseRows).forEach(row => {
             row.removeAttribute('data-nkust-processed');
           });
           scanAndProcessCourses();
           sendResponse({ success: true });
-        } else if (request.type === 'CLEAR_CACHE') {
+        } else if (request.type === 'REFRESH_QUOTAS' || request.type === 'CLEAR_CACHE') {
+          // 手動更新名額：清空快取、清空舊佇列、重設 DOM 狀態並立即以高優先度重查
           apiService.clearCache();
-          uiHighlighter.clearAll();
+          apiService.clearQueue();
+
           document.querySelectorAll(config.SELECTORS.courseRows).forEach(row => {
             row.removeAttribute('data-nkust-processed');
           });
-          scanAndProcessCourses();
-          sendResponse({ success: true });
+          scanAndProcessCourses({ forceRefresh: true, isManualRefresh: true });
+
+          const rowCount = document.querySelectorAll(config.SELECTORS.courseRows).length;
+          sendResponse({ success: true, count: rowCount });
         }
         return true;
       });

@@ -18,16 +18,30 @@ class NkustApiService {
   }
 
   /**
-   * 取得快取的名額資料
+   * 取得快取的名額資料 (含 TTL 檢查，過期自動視為 cache miss)
    */
   getCached(key) {
-    return this.cache.get(key);
+    if (!key) return null;
+    const item = this.cache.get(key);
+    if (!item) return null;
+
+    const settings = (this.config && this.config.getSettings)
+      ? this.config.getSettings()
+      : (this.config ? this.config.DEFAULTS : {});
+    const ttlMs = ((settings && settings.cacheTTLSec) ? settings.cacheTTLSec : 20) * 1000;
+
+    if (Date.now() - item.timestamp > ttlMs) {
+      this.cache.delete(key);
+      return null;
+    }
+    return item;
   }
 
   /**
    * 設定快取
    */
   setCached(key, data) {
+    if (!key) return;
     this.cache.set(key, {
       ...data,
       timestamp: Date.now()
@@ -35,10 +49,21 @@ class NkustApiService {
   }
 
   /**
-   * 清除快取
+   * 清除快取 (可指定特定 keys 或清空全部)
    */
-  clearCache() {
-    this.cache.clear();
+  clearCache(keys = null) {
+    if (Array.isArray(keys)) {
+      keys.forEach(k => this.cache.delete(k));
+    } else {
+      this.cache.clear();
+    }
+  }
+
+  /**
+   * 清除尚未執行的排隊佇列
+   */
+  clearQueue() {
+    this.queue = [];
   }
 
   /**
@@ -122,48 +147,67 @@ class NkustApiService {
   }
 
   /**
-   * 排入查詢佇列 (支援優先度與完成回呼)
+   * 排入查詢佇列 (支援多級優先度、重複排隊升級與完成回呼)
+   * @param {Object} courseData - 課程資訊
+   * @param {Function} onResult - 回呼函數
+   * @param {number|boolean} priority - 優先級 (1: 手動/目標, 2: 可視範圍, 3: 一般, 4: 低；或 true/false)
    */
-  enqueue(courseData, onResult, isHighPriority = false) {
+  enqueue(courseData, onResult, priority = 3) {
     const { encodeCrsno, crsno, courseId } = courseData;
     const cacheKey = encodeCrsno || crsno || courseId;
+    if (!cacheKey) return;
 
-    // 若已有快取，直接回傳
+    // 若已有快取且未過期，直接回傳
     const cached = this.getCached(cacheKey);
     if (cached) {
       onResult(cached);
       return;
     }
 
-    // 避免佇列中重複排入同一課號
-    const exists = this.queue.some(item => item.cacheKey === cacheKey);
-    if (exists) return;
+    // 優先度轉換 (相容布林值與數字)
+    const prio = typeof priority === 'boolean'
+      ? (priority ? (this.config.PRIORITY?.MANUAL || 1) : (this.config.PRIORITY?.NORMAL || 3))
+      : (Number(priority) || 3);
+
+    // 檢查佇列中是否已有該課號
+    const existingIndex = this.queue.findIndex(item => item.cacheKey === cacheKey);
+    if (existingIndex !== -1) {
+      // 若新請求優先級更高 (數字更小)，升級該任務並重新排序
+      if (prio < this.queue[existingIndex].priority) {
+        this.queue[existingIndex].priority = prio;
+        this.queue.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
+      }
+      return;
+    }
 
     const task = {
       courseData,
       cacheKey,
       onResult,
+      priority: prio,
+      createdAt: Date.now(),
       retries: 0
     };
 
-    if (isHighPriority) {
-      this.queue.unshift(task);
-    } else {
-      this.queue.push(task);
-    }
+    // 依優先級 (升冪) 與 建立時間 排序插入
+    this.queue.push(task);
+    this.queue.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
 
     this.processQueue();
   }
 
   /**
-   * 執行佇列處理器 (受最大並發數與間隔節流保護)
+   * 執行佇列處理器 (受最大並發數與間隔節流保護，依優先序依序取出)
    */
   async processQueue() {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
-    const maxConcurrency = this.config.DEFAULTS.maxConcurrency;
-    const delayMs = this.config.DEFAULTS.requestDelayMs;
+    const settings = (this.config && this.config.getSettings)
+      ? this.config.getSettings()
+      : (this.config ? this.config.DEFAULTS : {});
+    const maxConcurrency = (settings && settings.maxConcurrency) || 3;
+    const delayMs = (settings && settings.requestDelayMs) || 60;
 
     while (this.queue.length > 0 && this.activeRequests < maxConcurrency) {
       const task = this.queue.shift();
@@ -171,21 +215,26 @@ class NkustApiService {
 
       this.fetchQuota(task.courseData)
         .then(result => {
-          this.setCached(task.cacheKey, result);
+          // 成功取得且非 ERROR 狀態時寫入快取；若為 ERROR 則不快取，允許後續重試
+          if (result && result.status !== this.config.STATUS.ERROR) {
+            this.setCached(task.cacheKey, result);
+          }
           task.onResult(result);
         })
         .catch(err => {
           console.warn('[NKUST Highlighter] 取得名額失敗:', task.cacheKey, err);
           const failResult = {
-            status: this.config.STATUS.UNAVAILABLE,
+            status: this.config.STATUS.ERROR,
             remaining: null,
-            error: err.message
+            capacity: null,
+            enrolled: null,
+            error: err.message || '伺服器回應異常或連線中斷'
           };
           task.onResult(failResult);
         })
         .finally(() => {
           this.activeRequests--;
-          // 延遲後繼續處理下一個，防止突發大量請求
+          // 延遲後繼續處理下一個，防止突發大量請求衝擊校務系統
           setTimeout(() => {
             this.isProcessing = false;
             this.processQueue();
@@ -367,37 +416,67 @@ class NkustApiService {
       if (remMatch) remaining = parseInt(remMatch[1], 10);
     }
 
-    // 4. 計算剩餘名額
-   if (remaining === null && capacity !== null && enrolled !== null) {
-     remaining = capacity - enrolled;
-   }
+    // 4. 合理性驗證與剩餘名額計算 (Sanity Checks)
+    if (capacity !== null && (!Number.isFinite(capacity) || capacity < 0)) {
+      capacity = null;
+    }
+    if (enrolled !== null && (!Number.isFinite(enrolled) || enrolled < 0)) {
+      enrolled = null;
+    }
+    if (reserved !== null && (!Number.isFinite(reserved) || reserved < 0)) {
+      reserved = 0;
+    }
+    if (remaining !== null && (!Number.isFinite(remaining) || remaining < 0)) {
+      remaining = Math.max(0, remaining);
+    }
 
-   // 5. 判斷狀態
-   let status = this.config.STATUS.UNAVAILABLE;
-   const threshold = this.config.DEFAULTS.lowQuotaThreshold;
+    // 若未直接取得 remaining，但有容量與已選人數，則計算剩餘名額 (限修人數 - 已選上人數)
+    // 注意：不可扣除保留人數，否則限修大於已選上時會被誤判為額滿
+    if (remaining === null && capacity !== null && enrolled !== null) {
+      remaining = Math.max(0, capacity - enrolled);
+    }
 
-   if (remaining !== null) {
-     if (remaining <= 0) {
-       status = this.config.STATUS.FULL;
-     } else if (remaining <= threshold) {
-       status = this.config.STATUS.LOW;
-     } else {
-       status = this.config.STATUS.AVAILABLE;
-     }
-   } else if (html.includes('額滿')) {
-     status = this.config.STATUS.FULL;
-     remaining = 0;
-   }
+    // 5. 嚴謹判斷狀態 (絕不將「解析失敗」誤判為 UNAVAILABLE 不可選)
+    const settings = (this.config && this.config.getSettings)
+      ? this.config.getSettings()
+      : (this.config ? this.config.DEFAULTS : {});
+    const threshold = (settings && settings.lowQuotaThreshold) || 5;
 
-   return {
-     capacity,
-     reserved,
-     enrolled,
-     remaining,
-     status,
-     rawHtml: html
-   };
- }
+    let status = this.config.STATUS.ERROR;
+    let parseError = null;
+
+    if (remaining !== null) {
+      if (capacity === 0) {
+        // 限修人數為 0，確定為不可選/停開
+        status = this.config.STATUS.UNAVAILABLE;
+      } else if (remaining <= 0) {
+        status = this.config.STATUS.FULL;
+      } else if (remaining <= threshold) {
+        status = this.config.STATUS.LOW;
+      } else {
+        status = this.config.STATUS.AVAILABLE;
+      }
+    } else if (html.includes('額滿') || html.includes('已額滿')) {
+      status = this.config.STATUS.FULL;
+      remaining = 0;
+    } else if (html.includes('停開') || html.includes('不開放') || capacity === 0) {
+      status = this.config.STATUS.UNAVAILABLE;
+    } else {
+      // 找不到可信數據，回傳 ERROR 而非 UNAVAILABLE
+      status = this.config.STATUS.ERROR;
+      parseError = '無法解析名額資訊';
+    }
+
+    return {
+      capacity,
+      reserved,
+      enrolled,
+      remaining,
+      status,
+      error: parseError,
+      rawHtml: html
+    };
+  }
 
   /**
    * 本地測試輔助方法：根據當前 HTML 檔案中的資料或課號模擬不同名額狀態
@@ -458,11 +537,16 @@ class NkustApiService {
       enrolled = 20; // 剩餘 15 -> 綠色
     }
 
-    const remaining = Math.max(0, capacity - reserved - enrolled);
+    const mockSettings = (this.config && this.config.getSettings)
+      ? this.config.getSettings()
+      : (this.config ? this.config.DEFAULTS : {});
+    const mockThreshold = (mockSettings && mockSettings.lowQuotaThreshold) || 5;
+
+    const remaining = Math.max(0, capacity - enrolled);
     let status = this.config.STATUS.AVAILABLE;
     if (remaining <= 0) {
       status = this.config.STATUS.FULL;
-    } else if (remaining <= this.config.DEFAULTS.lowQuotaThreshold) {
+    } else if (remaining <= mockThreshold) {
       status = this.config.STATUS.LOW;
     } else {
       status = this.config.STATUS.AVAILABLE;

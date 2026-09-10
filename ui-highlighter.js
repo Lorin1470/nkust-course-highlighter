@@ -17,11 +17,16 @@ class NkustUiHighlighter {
     // 清除既有狀態 class
     this.clearRowStatus(rowElement);
 
-    const { status, remaining, capacity, enrolled, isMock } = quotaInfo;
+    const { status, remaining, capacity, enrolled, isMock, isTarget } = quotaInfo;
 
     // 1. 為 <tr> 附加狀態樣式 Class
     rowElement.classList.add(`nkust-status-${status}`);
     rowElement.setAttribute('data-nkust-status', status);
+
+    if (isTarget) {
+      rowElement.classList.add('nkust-row-target');
+      rowElement.setAttribute('data-nkust-target', 'true');
+    }
 
     // 2. 找到課名欄位 (td:nth-child(4)) 與人數小圖示 (.selcrsnum)
     const nameCell = rowElement.querySelector(this.config.SELECTORS.cellCourseName);
@@ -42,32 +47,44 @@ class NkustUiHighlighter {
     }
 
     // 更新 Badge 樣式與文字
-    badge.className = `nkust-quota-badge nkust-badge-${status}`;
+    badge.className = `nkust-quota-badge nkust-badge-${status}${isTarget ? ' nkust-badge-target' : ''}`;
 
     let displayText = '';
     let tooltipText = '';
+
+    const resInfo = (typeof reserved === 'number' && reserved > 0) ? ` (保留: ${reserved}人)` : '';
 
     if (status === this.config.STATUS.LOADING) {
       displayText = '查詢中...';
       tooltipText = '正在安全取得名額資訊...';
     } else if (status === this.config.STATUS.FULL) {
       displayText = '已額滿';
-      tooltipText = `限修: ${capacity ?? '-'}人 | 已選: ${enrolled ?? '-'}人 | 剩餘: 0人`;
+      tooltipText = `限修: ${capacity ?? '-'}人 | 已選: ${enrolled ?? '-'}人${resInfo} | 剩餘: 0人`;
     } else if (remaining !== null && remaining > 0) {
       // 只要 remaining > 0，一律顯示名額，絕不誤判不可選
       displayText = `餘 ${remaining}`;
-      tooltipText = `限修: ${capacity ?? '-'}人 | 已選: ${enrolled ?? '-'}人 | 剩餘: ${remaining}人`;
+      tooltipText = `限修: ${capacity ?? '-'}人 | 已選: ${enrolled ?? '-'}人${resInfo} | 剩餘: ${remaining}人`;
       if (isMock) tooltipText += ' (本地測試模擬數據)';
     } else if (status === this.config.STATUS.AVAILABLE || status === this.config.STATUS.LOW) {
       displayText = `餘 ${remaining ?? '?'}`;
-      tooltipText = `限修: ${capacity ?? '-'}人 | 已選: ${enrolled ?? '-'}人 | 剩餘: ${remaining ?? '?'}人`;
+      tooltipText = `限修: ${capacity ?? '-'}人 | 已選: ${enrolled ?? '-'}人${resInfo} | 剩餘: ${remaining ?? '?'}人`;
       if (isMock) tooltipText += ' (本地測試模擬數據)';
-    } else if (quotaInfo.error) {
+    } else if (status === this.config.STATUS.ERROR || quotaInfo.error) {
       displayText = '查詢失敗';
-      tooltipText = `伺服器回應異常: ${quotaInfo.error}`;
-    } else {
+      tooltipText = quotaInfo.error
+        ? `名額查詢失敗 (${quotaInfo.error})，請稍後重新整理`
+        : '名額查詢失敗，請稍後重新整理';
+    } else if (status === this.config.STATUS.UNAVAILABLE) {
       displayText = '不可選';
       tooltipText = '此課程停開或容量為 0';
+    } else {
+      displayText = '未知';
+      tooltipText = '無法確認名額狀態，請稍後重新整理';
+    }
+
+    if (isTarget) {
+      displayText = `🎯 ${displayText}`;
+      tooltipText = `[目標追蹤] ${tooltipText}`;
     }
 
     badge.textContent = displayText;
@@ -83,11 +100,12 @@ class NkustUiHighlighter {
   /**
    * 設定為載入中狀態
    */
-  setRowLoading(rowElement) {
+  setRowLoading(rowElement, isTarget = false) {
     if (!rowElement) return;
     this.highlightRow(rowElement, {
       status: this.config.STATUS.LOADING,
-      remaining: null
+      remaining: null,
+      isTarget
     });
   }
 
@@ -100,9 +118,13 @@ class NkustUiHighlighter {
       'nkust-status-low',
       'nkust-status-full',
       'nkust-status-unavailable',
+      'nkust-status-error',
       'nkust-status-loading',
-      'nkust-row-disabled'
+      'nkust-row-disabled',
+      'nkust-row-target'
     );
+    rowElement.removeAttribute('data-nkust-status');
+    rowElement.removeAttribute('data-nkust-target');
   }
 
   /**
