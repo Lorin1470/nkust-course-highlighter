@@ -1,9 +1,15 @@
 # 高科大選課系統「名額顏色提示」瀏覽器插件
 ![版本](https://img.shields.io/badge/version-1.0.0-blue)
+[![Edge Add-ons](https://img.shields.io/badge/Edge%20Add--ons-線上安裝-0078D7?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/%E9%AB%98%E7%A7%91%E5%A4%A7%E9%81%B8%E8%AA%B2%E7%B3%BB%E7%B5%B1%E5%90%8D%E9%A1%8D%E9%A1%8F%E8%89%B2%E6%8F%90%E7%A4%BA/gkfockcfgkeoifjgaakpgkhlepgkmgjn)
 ![狀態](https://img.shields.io/badge/status-已發布-brightgreen)
+
 > **NKUST Course Quota Highlighter** (Chrome / Edge Extension - Manifest V3)
 
 本擴充功能專為國立高雄科技大學（NKUST）新版選課系統設計。針對新系統不再直接標記名額狀態、必須逐一點進課程才能確認餘額的痛點，透過安全、非破壞性的方式在課程列表自動還原舊系統的直覺顏色指標與名額標籤，大幅提升選課瀏覽效率。
+
+### 📥 立即安裝
+👉 **[Microsoft Edge 擴充功能商店下載](https://microsoftedge.microsoft.com/addons/detail/%E9%AB%98%E7%A7%91%E5%A4%A7%E9%81%B8%E8%AA%B2%E7%B3%BB%E7%B5%B1%E5%90%8D%E9%A1%8D%E9%A1%8F%E8%89%B2%E6%8F%90%E7%A4%BA/gkfockcfgkeoifjgaakpgkhlepgkmgjn)**（一鍵安裝，免手動載入）  
+*(Chrome 瀏覽器亦可於上述 Edge 商店頁面點擊「允許來自其他市集的擴充功能」後直接安裝)*
 
 ---
 
@@ -70,16 +76,27 @@ nkust-course-highlighter/
 
 ---
 
-## 安裝步驟 (Chrome / Edge)
+## 安裝方式
 
-### 步驟 1：開啟瀏覽器擴充功能管理頁面
+### 方法一：商店一鍵安裝（推薦，最簡單）
+
+直接前往 Microsoft Edge Add-ons 擴充功能商店頁面安裝：
+* 🔗 **下載連結**：[高科大選課系統名額顏色提示 - Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/%E9%AB%98%E7%A7%91%E5%A4%A7%E9%81%B8%E8%AA%B2%E7%B3%BB%E7%B5%B1%E5%90%8D%E9%A1%8D%E9%A1%8F%E8%89%B2%E6%8F%90%E7%A4%BA/gkfockcfgkeoifjgaakpgkhlepgkmgjn)
+* **Microsoft Edge 使用者**：點擊「取得」按鈕即可完成安裝。
+* **Google Chrome 使用者**：進入上方商店頁面後，點擊橫幅「允許來自其他市集的擴充功能」，再點擊「加到 Chrome」即可直接安裝使用。
+
+---
+
+### 方法二：開發者模式手動載入（開發 / 測試用）
+
+#### 步驟 1：開啟瀏覽器擴充功能管理頁面
 * **Google Chrome**：在網址列輸入 `chrome://extensions` 並按下 Enter。
 * **Microsoft Edge**：在網址列輸入 `edge://extensions` 並按下 Enter。
 
-### 步驟 2：開啟「開發者模式」
+#### 步驟 2：開啟「開發者模式」
 * 在管理頁面右上角（Edge 在左側），將 **「開發者模式」 (Developer mode)** 開關切換為 **開啟**。
 
-### 步驟 3：載入已解包的擴充功能
+#### 步驟 3：載入已解包的擴充功能
 1. 點擊左上角的 **「載入未封裝項目」 (Load unpacked)** 按鈕。
 2. 在檔案選擇器中，選取本專案目錄（包含 `manifest.json` 的 `nkust-course-highlighter` 資料夾）。
 3. 點擊「選取」，即可看到「高科大選課系統名額顏色提示」成功安裝！
