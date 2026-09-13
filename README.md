@@ -196,12 +196,11 @@ nkust-course-highlighter/
 
 ## ☕ 贊助與支持 (Donate)
 
-如果這個擴充功能在選課期間為您節省了時間、順利選到心儀的課程，歡迎請作者喝杯咖啡！  
-支援使用 **SOL**、**USDC** 或 **USDT** 快速贊助：
+如果這個擴充功能在選課期間為您節省了時間、順利選到心儀的課程，歡迎請作者喝杯咖啡！您的支持是持續維護與改進的最大動力 💖
 
 <p align="center">
   <a href="https://donate.minerdog.qzz.io" target="_blank" rel="noopener noreferrer">
-    <img src="https://donate.minerdog.qzz.io/donate-solana.svg" height="42" alt="Donate with Solana" />
+    <img src="https://donate.minerdog.qzz.io/donate-solana-banner.svg" width="600" alt="Donate with Solana Banner" />
   </a>
 </p>
 
