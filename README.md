@@ -181,19 +181,6 @@ nkust-course-highlighter/
 
 ---
 
-## ☕ 贊助與支持 (Donate)
-
-如果這個擴充功能在選課期間為您節省了時間、順利選到心儀的課程，歡迎請作者喝杯咖啡！  
-支援使用 **SOL**、**USDC** 或 **USDT** 快速贊助：
-
-<p align="center">
-  <a href="https://donate.minerdog.qzz.io" target="_blank" rel="noopener noreferrer">
-    <img src="https://donate.minerdog.qzz.io/donate-solana.svg" height="42" alt="Donate with Solana" />
-  </a>
-</p>
-
----
-
 ## 開發與貢獻
 
 若您想參與本專案的開發或提出改進建議：
@@ -204,6 +191,19 @@ nkust-course-highlighter/
 4. 提交 Pull Request，說明您的變更與目的。
 
 > 本專案採用 MIT 授權條款，歡迎自由使用與修改。
+
+---
+
+## ☕ 贊助與支持 (Donate)
+
+如果這個擴充功能在選課期間為您節省了時間、順利選到心儀的課程，歡迎請作者喝杯咖啡！  
+支援使用 **SOL**、**USDC** 或 **USDT** 快速贊助：
+
+<p align="center">
+  <a href="https://donate.minerdog.qzz.io" target="_blank" rel="noopener noreferrer">
+    <img src="https://donate.minerdog.qzz.io/donate-solana.svg" height="42" alt="Donate with Solana" />
+  </a>
+</p>
 
 ---
 
